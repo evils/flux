@@ -3,7 +3,7 @@
 //! This package does not assume a location of the source code but does assume which packages are
 //! part of the prelude.
 
-use std::{env::consts, fs, io, io::Write, path::Path};
+use std::{env::consts, fs, io, io::Write, path::Path, sync::Arc};
 
 use anyhow::{anyhow, bail, Result};
 use libflate::gzip::Encoder;
@@ -11,8 +11,7 @@ use walkdir::WalkDir;
 
 use crate::{
     ast,
-    map::HashSet,
-    parser,
+    db::{Database, Flux},
     semantic::{
         env::Environment,
         flatbuffers::types::{build_module, finish_serialize},
@@ -48,20 +47,21 @@ pub fn infer_stdlib_dir(
     path: &Path,
     config: AnalyzerConfig,
 ) -> Result<(PackageExports, Packages, SemanticPackageMap)> {
-    let ast_packages = parse_dir(path)?;
+    let (db, package_list) = parse_dir(path)?;
 
     let mut infer_state = InferState {
         config,
         ..InferState::default()
     };
-    let prelude = infer_state.infer_pre(&ast_packages)?;
-    infer_state.infer_std(&ast_packages, &prelude)?;
+    let prelude = infer_state.infer_pre(&db)?;
+    infer_state.infer_std(&db, &package_list, &prelude)?;
 
     Ok((prelude, infer_state.imports, infer_state.sem_pkg_map))
 }
 
 /// Recursively parse all flux files within a directory.
-pub fn parse_dir(dir: &Path) -> io::Result<ASTPackageMap> {
+pub fn parse_dir(dir: &Path) -> io::Result<(Database, Vec<String>)> {
+    let mut db = Database::default();
     let mut files = Vec::new();
     let entries = WalkDir::new(dir)
         .into_iter()
@@ -82,84 +82,19 @@ pub fn parse_dir(dir: &Path) -> io::Result<ASTPackageMap> {
                     // to work with either separator.
                     normalized_path = normalized_path.replace('\\', "/");
                 }
-                let source = fs::read_to_string(entry.path())?;
-                let ast = parser::parse_string(
-                    normalized_path
-                        .rsplitn(2, "/stdlib/")
-                        .collect::<Vec<&str>>()[0]
-                        .to_owned(),
-                    &source,
-                );
-                files.push((source, ast));
+                let source = Arc::<str>::from(fs::read_to_string(entry.path())?);
+
+                let file_name = normalized_path
+                    .rsplitn(2, "/stdlib/")
+                    .collect::<Vec<&str>>()[0]
+                    .to_owned();
+                let path = file_name.rsplitn(2, '/').collect::<Vec<&str>>()[1].to_string();
+                files.push(path.clone());
+                db.set_source(path, source.clone());
             }
         }
     }
-    Ok(ast_map(files))
-}
-
-// Associates an import path with each file
-fn ast_map(files: Vec<(String, ast::File)>) -> ASTPackageMap {
-    files
-        .into_iter()
-        .fold(ASTPackageMap::new(), |mut acc, (source, file)| {
-            let path = file.name.rsplitn(2, '/').collect::<Vec<&str>>()[1].to_string();
-            acc.insert(
-                path.clone(),
-                ast::Package {
-                    base: ast::BaseNode {
-                        location: ast::SourceLocation {
-                            source: Some(source),
-                            ..ast::SourceLocation::default()
-                        },
-                        ..ast::BaseNode::default()
-                    },
-                    path,
-                    package: String::from(file.get_package()),
-                    files: vec![file],
-                },
-            );
-            acc
-        })
-}
-
-fn imports(pkg: &ast::Package) -> impl Iterator<Item = &str> {
-    pkg.files
-        .iter()
-        .flat_map(|file| file.imports.iter().map(|import| &import.path.value[..]))
-}
-
-// Determines the dependencies of a package. That is, all packages
-// that must be evaluated before the package in question. Each
-// dependency is added to the `deps` vector in evaluation order.
-#[allow(clippy::type_complexity)]
-fn dependencies<'a>(
-    name: &'a str,
-    pkgs: &'a ASTPackageMap,
-    mut deps: Vec<&'a str>,
-    mut seen: HashSet<&'a str>,
-    mut done: HashSet<&'a str>,
-) -> Result<(Vec<&'a str>, HashSet<&'a str>, HashSet<&'a str>)> {
-    if seen.contains(name) && !done.contains(name) {
-        Err(anyhow!(r#"package "{}" depends on itself"#, name))
-    } else {
-        seen.insert(name);
-        match pkgs.get(name) {
-            None => Err(anyhow!(r#"package "{}" not found"#, name)),
-            Some(pkg) => {
-                for name in imports(pkg) {
-                    let (x, y, z) = dependencies(name, pkgs, deps, seen, done)?;
-                    deps = x;
-                    seen = y;
-                    done = z;
-                    if !deps.contains(&name) {
-                        deps.push(name);
-                    }
-                }
-                done.insert(name);
-                Ok((deps, seen, done))
-            }
-        }
-    }
+    Ok((db, files))
 }
 
 #[derive(Default)]
@@ -171,7 +106,7 @@ struct InferState {
 }
 
 impl InferState {
-    fn infer_pre(&mut self, ast_packages: &ASTPackageMap) -> Result<PackageExports> {
+    fn infer_pre(&mut self, ast_packages: &Database) -> Result<PackageExports> {
         let mut prelude_map = PackageExports::new();
         for name in PRELUDE {
             // Infer each package in the prelude allowing the earlier packages to be used by later
@@ -184,8 +119,13 @@ impl InferState {
     }
 
     #[allow(clippy::type_complexity)]
-    fn infer_std(&mut self, ast_packages: &ASTPackageMap, prelude: &PackageExports) -> Result<()> {
-        for (path, _) in ast_packages.iter() {
+    fn infer_std(
+        &mut self,
+        ast_packages: &Database,
+        package_list: &[String],
+        prelude: &PackageExports,
+    ) -> Result<()> {
+        for path in package_list {
             // No need to infer the package again if it has already been inferred through a
             // dependency
             if !self.sem_pkg_map.contains_key(path) {
@@ -206,52 +146,20 @@ impl InferState {
     #[allow(clippy::type_complexity)]
     fn infer_pkg(
         &mut self,
-        name: &str,                   // name of package to infer
-        ast_packages: &ASTPackageMap, // ast_packages available for inference
-        prelude: &PackageExports,     // prelude types
+        name: &str,               // name of package to infer
+        db: &Database,            // ast_packages available for inference
+        prelude: &PackageExports, // prelude types
     ) -> Result<(
         PackageExports, // inferred types
         Package,        // semantic graph
     )> {
-        // Determine the order in which we must infer dependencies
-        let (deps, _, _) = dependencies(
-            name,
-            ast_packages,
-            Vec::new(),
-            HashSet::new(),
-            HashSet::new(),
-        )?;
-
-        // Infer all dependencies
-        for pkg in deps {
-            if self.imports.import(pkg).is_none() {
-                let (env, sem_pkg) =
-                    self.infer_pkg_with_resolved_deps(pkg, ast_packages, prelude)?;
-
-                self.sem_pkg_map.insert(pkg.to_string(), sem_pkg);
-                self.imports.insert(pkg.to_string(), env);
-            }
-        }
-
-        self.infer_pkg_with_resolved_deps(name, ast_packages, prelude)
-    }
-
-    fn infer_pkg_with_resolved_deps(
-        &mut self,
-        name: &str,                   // name of package to infer
-        ast_packages: &ASTPackageMap, // ast_packages available for inference
-        prelude: &PackageExports,     // prelude types
-    ) -> Result<(
-        PackageExports, // inferred types
-        Package,        // semantic graph
-    )> {
-        let file = ast_packages
-            .get(name)
+        let file = db
+            .ast_package(name.into())
             .ok_or_else(|| anyhow!(r#"package import "{}" not found"#, name))?;
 
         let env = Environment::new(prelude.into());
         let mut analyzer = Analyzer::new(env, &mut self.imports, self.config.clone());
-        let (exports, sem_pkg) = analyzer.analyze_ast(file).map_err(|mut err| {
+        let (exports, sem_pkg) = analyzer.analyze_ast(&file).map_err(|mut err| {
             if err.error.source.is_none() {
                 err.error.source = file.base.location.source.clone();
             }
@@ -402,11 +310,7 @@ pub struct Module {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        ast,
-        parser::{self, parse_string},
-        semantic::convert::convert_polytype,
-    };
+    use crate::{ast, parser, semantic::convert::convert_polytype};
 
     #[test]
     fn infer_program() -> Result<()> {
@@ -426,13 +330,14 @@ mod tests {
 
             z = b.y
         "#;
-        let ast_packages: ASTPackageMap = semantic_map! {
-            String::from("a") => parse_string("a.flux".to_string(), a).into(),
-            String::from("b") => parse_string("b.flux".to_string(), b).into(),
-            String::from("c") => parse_string("c.flux".to_string(), c).into(),
-        };
+
+        let mut db = Database::default();
+
+        for (k, v) in [("a", a), ("b", b), ("c", c)] {
+            db.set_source(k.into(), v.into());
+        }
         let mut infer_state = InferState::default();
-        let (types, _) = infer_state.infer_pkg("c", &ast_packages, &PackageExports::new())?;
+        let (types, _) = infer_state.infer_pkg("c", &db, &PackageExports::new())?;
 
         let want = PackageExports::try_from(vec![(types.lookup_symbol("z").unwrap().clone(), {
             let mut p = parser::Parser::new("int");
@@ -498,18 +403,16 @@ mod tests {
         let b = r#"
             import "a"
         "#;
-        let ast_packages: ASTPackageMap = semantic_map! {
-            String::from("a") => parse_string("a.flux".to_string(), a).into(),
-            String::from("b") => parse_string("b.flux".to_string(), b).into(),
-        };
-        let got_err = dependencies(
-            "b",
-            &ast_packages,
-            Vec::new(),
-            HashSet::new(),
-            HashSet::new(),
-        )
-        .expect_err("expected cyclic dependency error");
+
+        let mut db = Database::default();
+
+        for (k, v) in [("a", a), ("b", b)] {
+            db.set_source(k.into(), v.into());
+        }
+
+        let got_err = db
+            .semantic_package("b".into())
+            .expect_err("expected cyclic dependency error");
 
         assert_eq!(
             r#"package "b" depends on itself"#.to_string(),
