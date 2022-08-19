@@ -5,6 +5,7 @@
 // tags: date/time
 package date
 
+import "internal/location"
 
 // second returns the second of a specified time. Results range from `[0 - 59]`.
 //

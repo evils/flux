@@ -11,7 +11,6 @@ use walkdir::WalkDir;
 
 use crate::{
     ast,
-    db::{Database, Flux},
     semantic::{
         env::Environment,
         flatbuffers::types::{build_module, finish_serialize},
@@ -48,6 +47,10 @@ pub fn infer_stdlib_dir(
     config: AnalyzerConfig,
 ) -> Result<(PackageExports, Packages, SemanticPackageMap)> {
     let (db, package_list) = parse_dir(path)?;
+
+    for name in &package_list {
+        db.semantic_package(name.clone())?;
+    }
 
     let mut infer_state = InferState {
         config,
@@ -306,6 +309,188 @@ pub struct Module {
     /// The code
     pub code: Option<nodes::Package>,
 }
+
+#[allow(missing_docs)] // Warns on the generated FluxStorage type
+mod db {
+    use crate::{
+        errors::SalvageResult,
+        parser,
+        semantic::{nodes, FileErrors, PackageExports},
+    };
+
+    use super::*;
+
+    use std::{
+        collections::HashSet,
+        sync::{Arc, Mutex},
+    };
+
+    pub trait FluxBase {
+        fn has_package(&self, package: &str) -> bool;
+        fn set_source(&mut self, path: String, source: Arc<str>);
+        fn source(&self, path: String) -> Arc<str>;
+    }
+
+    /// Defines queries that drives flux compilation
+    #[salsa::query_group(FluxStorage)]
+    pub trait Flux: FluxBase {
+        /// Source code for a particular flux file
+        #[salsa::input]
+        #[doc(hidden)]
+        fn source_inner(&self, path: String) -> Arc<str>;
+
+        #[salsa::input]
+        fn analyzer_config(&self) -> AnalyzerConfig;
+
+        #[salsa::dependencies]
+        fn ast_package_inner(&self, path: String) -> Arc<ast::Package>;
+
+        #[salsa::transparent]
+        fn ast_package(&self, path: String) -> Option<Arc<ast::Package>>;
+
+        #[salsa::transparent]
+        fn prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
+
+        #[salsa::dependencies]
+        fn semantic_package(
+            &self,
+            path: String,
+        ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>>;
+    }
+
+    /// Storage for flux programs and their intermediates
+    #[salsa::database(FluxStorage)]
+    pub struct Database {
+        storage: salsa::Storage<Self>,
+        packages: Mutex<HashSet<String>>,
+    }
+
+    impl Default for Database {
+        fn default() -> Self {
+            let mut db = Self {
+                storage: Default::default(),
+                packages: Default::default(),
+            };
+            db.set_analyzer_config(AnalyzerConfig::default());
+            db
+        }
+    }
+    impl salsa::Database for Database {}
+
+    impl FluxBase for Database {
+        fn has_package(&self, package: &str) -> bool {
+            self.packages.lock().unwrap().contains(package)
+        }
+        fn source(&self, path: String) -> Arc<str> {
+            self.source_inner(path)
+        }
+        fn set_source(&mut self, path: String, source: Arc<str>) {
+            self.packages.lock().unwrap().insert(path.clone());
+
+            self.set_source_inner(path, source)
+        }
+    }
+
+    fn ast_package_inner(db: &dyn Flux, path: String) -> Arc<ast::Package> {
+        eprintln!("AST: {}", path);
+        let source = db.source(path.clone());
+
+        let file = parser::parse_string(path.clone(), &source);
+
+        Arc::new(ast::Package {
+            base: ast::BaseNode {
+                location: ast::SourceLocation {
+                    source: Some(source.to_string()),
+                    ..ast::SourceLocation::default()
+                },
+                ..ast::BaseNode::default()
+            },
+            path,
+            package: String::from(file.get_package()),
+            files: vec![file],
+        })
+    }
+
+    fn ast_package(db: &dyn Flux, path: String) -> Option<Arc<ast::Package>> {
+        if db.has_package(&path) {
+            Some(db.ast_package_inner(path))
+        } else {
+            None
+        }
+    }
+
+    fn prelude(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
+        let mut prelude_map = PackageExports::new();
+        for name in PRELUDE {
+            // Infer each package in the prelude allowing the earlier packages to be used by later
+            // packages within the prelude list.
+            let (types, _sem_pkg) = semantic_package_with_prelude(db, name.into(), &prelude_map)
+                .map_err(|err| err.error)?;
+
+            prelude_map.copy_bindings_from(&types);
+        }
+        Ok(Arc::new(prelude_map))
+    }
+
+    fn semantic_package(
+        db: &dyn Flux,
+        path: String,
+    ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
+        eprintln!("{}", path);
+        let prelude = if [
+            "system",
+            "date",
+            "math",
+            "strings",
+            "regexp",
+            "experimental/table",
+        ]
+        .contains(&&path[..])
+            || PRELUDE.contains(&&path[..])
+        {
+            Default::default()
+        } else {
+            db.prelude()?
+        };
+
+        semantic_package_with_prelude(db, path, &prelude)
+    }
+
+    fn semantic_package_with_prelude(
+        db: &dyn Flux,
+        path: String,
+        prelude: &PackageExports,
+    ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
+        let file = db.ast_package_inner(path);
+
+        let env = Environment::new(prelude.into());
+        let mut importer = &*db;
+        let mut analyzer = Analyzer::new(env, &mut importer, db.analyzer_config());
+        let (exports, sem_pkg) = analyzer.analyze_ast(&file).map_err(|err| {
+            err.map(|(exports, sem_pkg)| (Arc::new(exports), Arc::new(sem_pkg)))
+                .map_err(Arc::new)
+        })?;
+
+        Ok((Arc::new(exports), Arc::new(sem_pkg)))
+    }
+
+    impl Importer for &dyn Flux {
+        fn import(&mut self, path: &str) -> Option<PolyType> {
+            eprintln!("IMPORT: {}", path);
+            self.semantic_package(path.into())
+                .map_err(|err| eprintln!("{}", err))
+                .ok()
+                .map(|(exports, _)| exports.typ())
+        }
+        fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {
+            self.semantic_package(path.into())
+                .map_err(|err| eprintln!("{}", err))
+                .ok()
+                .and_then(|(exports, _)| exports.lookup_symbol(symbol_name).cloned())
+        }
+    }
+}
+pub use self::db::{Database, Flux, FluxBase};
 
 #[cfg(test)]
 mod tests {

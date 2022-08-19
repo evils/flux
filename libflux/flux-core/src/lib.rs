@@ -41,7 +41,7 @@ pub mod semantic;
 
 mod map;
 
-use std::{hash::BuildHasherDefault, sync::Arc};
+use std::hash::BuildHasherDefault;
 
 use anyhow::{bail, Result};
 pub use ast::DEFAULT_PACKAGE_NAME;
@@ -88,92 +88,6 @@ pub fn merge_packages(out_pkg: &mut ast::Package, in_pkg: &mut ast::Package) -> 
     out_pkg.files.append(&mut in_pkg.files);
     Ok(())
 }
-
-#[allow(missing_docs)] // Warns on the generated FluxStorage type
-mod db {
-    use crate::{
-        errors::SalvageResult,
-        semantic::{nodes, FileErrors, PackageExports},
-    };
-
-    use super::*;
-
-    use std::{collections::HashSet, sync::Mutex};
-
-    pub trait FluxBase {
-        fn has_package(&self, package: &str) -> bool;
-    }
-
-    /// Defines queries that drives flux compilation
-    #[salsa::query_group(FluxStorage)]
-    pub trait Flux: FluxBase {
-        /// Source code for a particular flux file
-        #[salsa::input]
-        fn source(&self, path: String) -> Arc<str>;
-
-        #[salsa::dependencies]
-        fn ast_package_(&self, path: String) -> Arc<ast::Package>;
-
-        #[salsa::transparent]
-        fn ast_package(&self, path: String) -> Option<Arc<ast::Package>>;
-
-        #[salsa::dependencies]
-        fn semantic_package(
-            &self,
-            path: String,
-        ) -> Arc<SalvageResult<(PackageExports, nodes::Package), FileErrors>>;
-    }
-
-    /// Storage for flux programs and their intermediates
-    #[salsa::database(FluxStorage)]
-    #[derive(Default)]
-    pub struct Database {
-        storage: salsa::Storage<Self>,
-        packages: Mutex<HashSet<String>>,
-    }
-    impl salsa::Database for Database {}
-
-    impl FluxBase for Database {
-        fn has_package(&self, package: &str) -> bool {
-            self.packages.lock().unwrap().contains(package)
-        }
-    }
-
-    fn ast_package_(db: &dyn Flux, path: String) -> Arc<ast::Package> {
-        let source = db.source(path.clone());
-
-        let file = parser::parse_string(path.clone(), &source);
-
-        Arc::new(ast::Package {
-            base: ast::BaseNode {
-                location: ast::SourceLocation {
-                    source: Some(source.to_string()),
-                    ..ast::SourceLocation::default()
-                },
-                ..ast::BaseNode::default()
-            },
-            path,
-            package: String::from(file.get_package()),
-            files: vec![file],
-        })
-    }
-
-    fn ast_package(db: &dyn Flux, path: String) -> Option<Arc<ast::Package>> {
-        if db.has_package(&path) {
-            Some(db.ast_package_(path))
-        } else {
-            None
-        }
-    }
-
-    fn semantic_package(
-        db: &dyn Flux,
-        path: String,
-    ) -> Arc<SalvageResult<(PackageExports, nodes::Package), FileErrors>> {
-    }
-}
-
-pub use self::db::{Database, Flux};
 
 #[cfg(test)]
 mod tests {
