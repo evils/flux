@@ -26,6 +26,8 @@ use crate::{
     },
 };
 
+const INTERNAL_PRELUDE: [&str; 2] = ["internal/boolean", "internal/location"];
+
 // List of packages to include into the Flux prelude
 const PRELUDE: [&str; 4] = [
     "internal/boolean",
@@ -348,7 +350,10 @@ mod db {
         #[salsa::transparent]
         fn ast_package(&self, path: String) -> Option<Arc<ast::Package>>;
 
-        #[salsa::transparent]
+        #[salsa::dependencies]
+        fn internal_prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
+
+        #[salsa::dependencies]
         fn prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
 
         #[salsa::dependencies]
@@ -392,7 +397,6 @@ mod db {
     }
 
     fn ast_package_inner(db: &dyn Flux, path: String) -> Arc<ast::Package> {
-        eprintln!("AST: {}", path);
         let source = db.source(path.clone());
 
         let file = parser::parse_string(path.clone(), &source);
@@ -419,6 +423,19 @@ mod db {
         }
     }
 
+    fn internal_prelude(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
+        let mut prelude_map = PackageExports::new();
+        for name in INTERNAL_PRELUDE {
+            // Infer each package in the prelude allowing the earlier packages to be used by later
+            // packages within the prelude list.
+            let (types, _sem_pkg) = semantic_package_with_prelude(db, name.into(), &prelude_map)
+                .map_err(|err| err.error)?;
+
+            prelude_map.copy_bindings_from(&types);
+        }
+        Ok(Arc::new(prelude_map))
+    }
+
     fn prelude(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
         let mut prelude_map = PackageExports::new();
         for name in PRELUDE {
@@ -436,8 +453,9 @@ mod db {
         db: &dyn Flux,
         path: String,
     ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
-        eprintln!("{}", path);
-        let prelude = if [
+        let prelude = if INTERNAL_PRELUDE.contains(&&path[..]) {
+            Default::default()
+        } else if [
             "system",
             "date",
             "math",
@@ -448,7 +466,7 @@ mod db {
         .contains(&&path[..])
             || PRELUDE.contains(&&path[..])
         {
-            Default::default()
+            db.internal_prelude()?
         } else {
             db.prelude()?
         };
@@ -476,7 +494,6 @@ mod db {
 
     impl Importer for &dyn Flux {
         fn import(&mut self, path: &str) -> Option<PolyType> {
-            eprintln!("IMPORT: {}", path);
             self.semantic_package(path.into())
                 .map_err(|err| eprintln!("{}", err))
                 .ok()
