@@ -42,7 +42,7 @@ pub type Result<T = ()> = std::result::Result<T, Error>;
 /// module.
 pub type Error = Located<ErrorKind>;
 
-#[derive(Debug, Display, PartialEq)]
+#[derive(Clone, Debug, Display, PartialEq)]
 #[allow(missing_docs)]
 pub enum ErrorKind {
     #[display(fmt = "{}", _0)]
@@ -63,7 +63,6 @@ pub enum ErrorKind {
     #[display(fmt = "invalid import path {}", _0)]
     InvalidImportPath(String),
 
-    #[derive(Clone, Debug, thiserror::Error)]
     #[display(fmt = "cycle {:?}", cycle)]
     ImportCycle { cycle: Vec<String> },
 
@@ -106,6 +105,7 @@ impl Substitutable for ErrorKind {
             | Self::InvalidBinOp(_)
             | Self::InvalidUnaryOp(_)
             | Self::InvalidImportPath(_)
+            | Self::ImportCycle { .. }
             | Self::UnableToVectorize(_)
             | Self::InvalidReturn
             | Self::Bug(_) => None,
@@ -538,8 +538,8 @@ impl File {
 
             infer.imports.insert(name.clone(), path.clone());
 
-            let poly = infer.importer.import(path).unwrap_or_else(|| {
-                infer.error(dec.loc.clone(), ErrorKind::InvalidImportPath(path.clone()));
+            let poly = infer.importer.import(path).unwrap_or_else(|err| {
+                infer.error(dec.loc.clone(), err);
                 PolyType::error()
             });
 

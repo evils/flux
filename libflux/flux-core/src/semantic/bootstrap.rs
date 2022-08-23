@@ -12,6 +12,7 @@ use walkdir::WalkDir;
 use crate::{
     ast,
     semantic::{
+        self,
         env::Environment,
         flatbuffers::types::{build_module, finish_serialize},
         fs::{FileSystemImporter, StdFS},
@@ -122,7 +123,7 @@ where
 {
     let mut env = PolyTypeHashMap::new();
     for pkg in PRELUDE {
-        if let Some(pkg_type) = importer.import(pkg) {
+        if let Ok(pkg_type) = importer.import(pkg) {
             if let MonoType::Record(typ) = pkg_type.expr {
                 add_record_to_map(&mut env, typ.as_ref(), &pkg_type.vars, &pkg_type.cons)?;
             } else {
@@ -251,7 +252,7 @@ pub struct Module {
 #[allow(missing_docs)] // Warns on the generated FluxStorage type
 mod db {
     use crate::{
-        errors::SalvageResult,
+        errors::{located, SalvageResult},
         parser,
         semantic::{nodes, FileErrors, PackageExports},
     };
@@ -305,6 +306,7 @@ mod db {
         #[salsa::transparent]
         fn prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
 
+        #[salsa::cycle(recover_cycle2)]
         fn semantic_package_inner(
             &self,
             path: String,
@@ -320,7 +322,7 @@ mod db {
         fn semantic_package_cycle(
             &self,
             path: String,
-        ) -> NeverEq<Result<Option<Arc<PackageExports>>, CycleError>>;
+        ) -> NeverEq<Result<Arc<PackageExports>, nodes::ErrorKind>>;
     }
 
     /// Storage for flux programs and their intermediates
@@ -481,27 +483,51 @@ mod db {
         Ok((Arc::new(exports), Arc::new(sem_pkg)))
     }
 
-    #[derive(Clone, Debug, thiserror::Error)]
-    #[error("found a cycle")]
-    pub struct CycleError {
-        cycle: Vec<String>,
-    }
-
     fn semantic_package_cycle(
         db: &dyn Flux,
         path: String,
-    ) -> NeverEq<Result<Option<Arc<PackageExports>>, CycleError>> {
-        NeverEq(Ok(db
-            .semantic_package(path)
-            .ok()
-            .map(|(exports, _)| exports)))
+    ) -> NeverEq<Result<Arc<PackageExports>, nodes::ErrorKind>> {
+        NeverEq(
+            db.semantic_package(path.clone())
+                .ok()
+                .map(|(exports, _)| exports)
+                .ok_or_else(|| nodes::ErrorKind::InvalidImportPath(path.clone())),
+        )
     }
 
+    fn recover_cycle2<T>(
+        _db: &dyn Flux,
+        cycle: &[String],
+        name: &String,
+    ) -> NeverEq<SalvageResult<T, Arc<FileErrors>>> {
+        let mut cycle: Vec<_> = cycle
+            .iter()
+            .filter(|k| k.starts_with("semantic_package_cycle("))
+            .map(|k| {
+                k.trim_matches(|c: char| c != '"')
+                    .trim_matches('"')
+                    .trim_start_matches('@')
+                    .to_string()
+            })
+            .collect();
+        dbg!(&cycle);
+        cycle.pop();
+
+        NeverEq(Err(Arc::new(FileErrors {
+            file: name.clone(),
+            source: None,
+            diagnostics: From::from(located(
+                Default::default(),
+                semantic::ErrorKind::Inference(nodes::ErrorKind::ImportCycle { cycle }),
+            )),
+        })
+        .into()))
+    }
     fn recover_cycle<T>(
         _db: &dyn Flux,
         cycle: &[String],
         _name: &String,
-    ) -> NeverEq<Result<T, CycleError>> {
+    ) -> NeverEq<Result<T, nodes::ErrorKind>> {
         dbg!(&cycle);
         // We get a list of strings like "semantic_package_inner(\"b\")",
         let mut cycle: Vec<_> = cycle
@@ -515,39 +541,35 @@ mod db {
             .collect();
         cycle.pop();
 
-        NeverEq(Err(CycleError { cycle }))
+        NeverEq(Err(nodes::ErrorKind::ImportCycle { cycle }))
     }
 
     impl Importer for Database {
-        fn import(&mut self, path: &str) -> Option<PolyType> {
+        fn import(&mut self, path: &str) -> Result<PolyType, nodes::ErrorKind> {
             self.semantic_package_cycle(path.into())
                 .0
-                .ok()
-                .flatten()
+                .map_err(|err| dbg!(err))
                 .map(|exports| exports.typ())
         }
         fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {
             self.semantic_package_cycle(path.into())
                 .0
                 .ok()
-                .flatten()
                 .and_then(|exports| exports.lookup_symbol(symbol_name).cloned())
         }
     }
 
     impl Importer for &dyn Flux {
-        fn import(&mut self, path: &str) -> Option<PolyType> {
+        fn import(&mut self, path: &str) -> Result<PolyType, nodes::ErrorKind> {
             self.semantic_package_cycle(path.into())
                 .0
-                .ok()
-                .flatten()
+                .map_err(|err| dbg!(err))
                 .map(|exports| exports.typ())
         }
         fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {
             self.semantic_package_cycle(path.into())
                 .0
                 .ok()
-                .flatten()
                 .and_then(|exports| exports.lookup_symbol(symbol_name).cloned())
         }
     }
@@ -611,7 +633,7 @@ mod tests {
             }
             convert_polytype(&typ_expr, &Default::default())?
         };
-        assert_eq!(db.import("a"), Some(a));
+        assert_eq!(db.import("a"), Ok(a));
 
         let b = {
             let mut p = parser::Parser::new("{x: int , y: int}");
@@ -621,7 +643,7 @@ mod tests {
             }
             convert_polytype(&typ_expr, &Default::default())?
         };
-        assert_eq!(db.import("b"), Some(b));
+        assert_eq!(db.import("b"), Ok(b));
 
         Ok(())
     }
