@@ -45,6 +45,14 @@ pub type SemanticPackageMap = SemanticMap<String, Package>;
 /// The prelude and the imports are returned.
 #[allow(clippy::type_complexity)]
 pub fn infer_stdlib_dir(
+    path: impl AsRef<Path>,
+    config: AnalyzerConfig,
+) -> Result<(PackageExports, Packages, SemanticPackageMap)> {
+    infer_stdlib_dir_(path.as_ref(), config)
+}
+
+#[allow(clippy::type_complexity)]
+fn infer_stdlib_dir_(
     path: &Path,
     config: AnalyzerConfig,
 ) -> Result<(PackageExports, Packages, SemanticPackageMap)> {
@@ -327,6 +335,16 @@ mod db {
         sync::{Arc, Mutex},
     };
 
+    #[derive(Clone, Debug)]
+    pub struct NeverEq<T>(pub T);
+
+    impl<T> Eq for NeverEq<T> {}
+    impl<T> PartialEq for NeverEq<T> {
+        fn eq(&self, _: &Self) -> bool {
+            false
+        }
+    }
+
     pub trait FluxBase {
         fn has_package(&self, package: &str) -> bool;
         fn set_source(&mut self, path: String, source: Arc<str>);
@@ -344,19 +362,28 @@ mod db {
         #[salsa::input]
         fn analyzer_config(&self) -> AnalyzerConfig;
 
-        #[salsa::dependencies]
-        fn ast_package_inner(&self, path: String) -> Arc<ast::Package>;
+        #[salsa::input]
+        fn use_prelude(&self) -> bool;
+
+        fn ast_package_inner(&self, path: String) -> NeverEq<Arc<ast::Package>>;
 
         #[salsa::transparent]
         fn ast_package(&self, path: String) -> Option<Arc<ast::Package>>;
 
-        #[salsa::dependencies]
-        fn internal_prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
+        fn internal_prelude(&self) -> NeverEq<Result<Arc<PackageExports>, Arc<FileErrors>>>;
 
-        #[salsa::dependencies]
+        fn prelude_inner(&self) -> NeverEq<Result<Arc<PackageExports>, Arc<FileErrors>>>;
+
+        #[salsa::transparent]
         fn prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
 
-        #[salsa::dependencies]
+        #[salsa::cycle(recover_cycle)]
+        fn semantic_package_inner(
+            &self,
+            path: String,
+        ) -> NeverEq<SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>>>;
+
+        #[salsa::transparent]
         fn semantic_package(
             &self,
             path: String,
@@ -377,6 +404,7 @@ mod db {
                 packages: Default::default(),
             };
             db.set_analyzer_config(AnalyzerConfig::default());
+            db.set_use_prelude(true);
             db
         }
     }
@@ -396,7 +424,8 @@ mod db {
         }
     }
 
-    fn ast_package_inner(db: &dyn Flux, path: String) -> Arc<ast::Package> {
+    fn ast_package_inner_2(db: &dyn Flux, path: String) -> Arc<ast::Package> {
+        eprintln!("AST: {}", path);
         let source = db.source(path.clone());
 
         let file = parser::parse_string(path.clone(), &source);
@@ -415,15 +444,19 @@ mod db {
         })
     }
 
+    fn ast_package_inner(db: &dyn Flux, path: String) -> NeverEq<Arc<ast::Package>> {
+        NeverEq(ast_package_inner_2(db, path))
+    }
+
     fn ast_package(db: &dyn Flux, path: String) -> Option<Arc<ast::Package>> {
         if db.has_package(&path) {
-            Some(db.ast_package_inner(path))
+            Some(db.ast_package_inner(path).0)
         } else {
             None
         }
     }
 
-    fn internal_prelude(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
+    fn internal_prelude_inner(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
         let mut prelude_map = PackageExports::new();
         for name in INTERNAL_PRELUDE {
             // Infer each package in the prelude allowing the earlier packages to be used by later
@@ -436,7 +469,11 @@ mod db {
         Ok(Arc::new(prelude_map))
     }
 
-    fn prelude(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
+    fn internal_prelude(db: &dyn Flux) -> NeverEq<Result<Arc<PackageExports>, Arc<FileErrors>>> {
+        NeverEq(internal_prelude_inner(db))
+    }
+
+    fn prelude_inner_2(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
         let mut prelude_map = PackageExports::new();
         for name in PRELUDE {
             // Infer each package in the prelude allowing the earlier packages to be used by later
@@ -449,11 +486,20 @@ mod db {
         Ok(Arc::new(prelude_map))
     }
 
-    fn semantic_package(
+    fn prelude_inner(db: &dyn Flux) -> NeverEq<Result<Arc<PackageExports>, Arc<FileErrors>>> {
+        NeverEq(prelude_inner_2(db))
+    }
+
+    fn prelude(db: &dyn Flux) -> Result<Arc<PackageExports>, Arc<FileErrors>> {
+        db.prelude_inner().0
+    }
+
+    fn semantic_package_inner_2(
         db: &dyn Flux,
         path: String,
     ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
-        let prelude = if INTERNAL_PRELUDE.contains(&&path[..]) {
+        eprintln!("SEMANTIC: {}", path);
+        let prelude = if !db.use_prelude() || INTERNAL_PRELUDE.contains(&&path[..]) {
             Default::default()
         } else if [
             "system",
@@ -466,7 +512,7 @@ mod db {
         .contains(&&path[..])
             || PRELUDE.contains(&&path[..])
         {
-            db.internal_prelude()?
+            db.internal_prelude().0?
         } else {
             db.prelude()?
         };
@@ -474,12 +520,26 @@ mod db {
         semantic_package_with_prelude(db, path, &prelude)
     }
 
+    fn semantic_package_inner(
+        db: &dyn Flux,
+        path: String,
+    ) -> NeverEq<SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>>> {
+        NeverEq(semantic_package_inner_2(db, path))
+    }
+
+    fn semantic_package(
+        db: &dyn Flux,
+        path: String,
+    ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
+        semantic_package_inner(db, path).0
+    }
+
     fn semantic_package_with_prelude(
         db: &dyn Flux,
         path: String,
         prelude: &PackageExports,
     ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
-        let file = db.ast_package_inner(path);
+        let file = db.ast_package_inner(path).0;
 
         let env = Environment::new(prelude.into());
         let mut importer = &*db;
@@ -490,6 +550,47 @@ mod db {
         })?;
 
         Ok((Arc::new(exports), Arc::new(sem_pkg)))
+    }
+
+    fn recover_cycle<T>(
+        _db: &dyn Flux,
+        cycle: &[String],
+        name: &String,
+    ) -> NeverEq<SalvageResult<T, Arc<FileErrors>>> {
+        let mut cycle: Vec<_> = cycle
+            .iter()
+            .filter(|k| k.starts_with("semantic_package("))
+            .map(|k| {
+                k.trim_matches(|c: char| c != '"')
+                    .trim_matches('"')
+                    .trim_start_matches('@')
+                    .to_string()
+            })
+            .collect();
+        dbg!(&cycle);
+        cycle.pop();
+
+        NeverEq(Err(Arc::new(FileErrors {
+            file: name.clone(),
+            source: None,
+            diagnostics: Default::default(), // TODO
+        })
+        .into()))
+    }
+
+    impl Importer for Database {
+        fn import(&mut self, path: &str) -> Option<PolyType> {
+            self.semantic_package(path.into())
+                .map_err(|err| eprintln!("{}", err))
+                .ok()
+                .map(|(exports, _)| exports.typ())
+        }
+        fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {
+            self.semantic_package(path.into())
+                .map_err(|err| eprintln!("{}", err))
+                .ok()
+                .and_then(|(exports, _)| exports.lookup_symbol(symbol_name).cloned())
+        }
     }
 
     impl Importer for &dyn Flux {
@@ -534,12 +635,12 @@ mod tests {
         "#;
 
         let mut db = Database::default();
+        db.set_use_prelude(false);
 
         for (k, v) in [("a", a), ("b", b), ("c", c)] {
             db.set_source(k.into(), v.into());
         }
-        let mut infer_state = InferState::default();
-        let (types, _) = infer_state.infer_pkg("c", &db, &PackageExports::new())?;
+        let (types, _) = db.semantic_package("c".into())?;
 
         let want = PackageExports::try_from(vec![(types.lookup_symbol("z").unwrap().clone(), {
             let mut p = parser::Parser::new("int");
@@ -550,7 +651,7 @@ mod tests {
             convert_polytype(&typ_expr, &Default::default())?
         })])
         .unwrap();
-        if want != types {
+        if want != *types {
             bail!(
                 "unexpected inference result:\n\nwant: {:?}\n\ngot: {:?}",
                 want,
@@ -558,41 +659,25 @@ mod tests {
             );
         }
 
-        let want = semantic_map! {
-            String::from("a") => {
-                let mut p = parser::Parser::new("{f: (x: A) => A}");
-                let typ_expr = p.parse_type_expression();
-                if let Err(err) = ast::check::check(ast::walk::Node::TypeExpression(&typ_expr)) {
-                    panic!(
-                        "TypeExpression parsing failed for int. {:?}", err
-                    );
-                }
-                convert_polytype(&typ_expr, &Default::default())?
-            },
-            String::from("b") => {
-                let mut p = parser::Parser::new("{x: int , y: int}");
-                let typ_expr = p.parse_type_expression();
-                if let Err(err) = ast::check::check(ast::walk::Node::TypeExpression(&typ_expr)) {
-                    panic!(
-                        "TypeExpression parsing failed for int. {:?}", err
-                    );
-                }
-                convert_polytype(&typ_expr, &Default::default())?
-            },
+        let a = {
+            let mut p = parser::Parser::new("{f: (x: A) => A}");
+            let typ_expr = p.parse_type_expression();
+            if let Err(err) = ast::check::check(ast::walk::Node::TypeExpression(&typ_expr)) {
+                panic!("TypeExpression parsing failed for int. {:?}", err);
+            }
+            convert_polytype(&typ_expr, &Default::default())?
         };
-        if want
-            != infer_state
-                .imports
-                .into_iter()
-                .map(|(k, v)| (k, v.typ()))
-                .collect::<SemanticMap<_, _>>()
-        {
-            bail!(
-                "unexpected type importer:\n\nwant: {:?}\n\ngot: {:?}",
-                want,
-                types,
-            );
-        }
+        assert_eq!(db.import("a"), Some(a));
+
+        let b = {
+            let mut p = parser::Parser::new("{x: int , y: int}");
+            let typ_expr = p.parse_type_expression();
+            if let Err(err) = ast::check::check(ast::walk::Node::TypeExpression(&typ_expr)) {
+                panic!("TypeExpression parsing failed for int. {:?}", err);
+            }
+            convert_polytype(&typ_expr, &Default::default())?
+        };
+        assert_eq!(db.import("b"), Some(b));
 
         Ok(())
     }
@@ -608,6 +693,8 @@ mod tests {
 
         let mut db = Database::default();
 
+        db.set_use_prelude(false);
+
         for (k, v) in [("a", a), ("b", b)] {
             db.set_source(k.into(), v.into());
         }
@@ -620,5 +707,11 @@ mod tests {
             r#"package "b" depends on itself"#.to_string(),
             got_err.to_string(),
         );
+    }
+
+    #[test]
+    fn bootstrap() {
+        infer_stdlib_dir("../../stdlib", AnalyzerConfig::default())
+            .unwrap_or_else(|err| panic!("{}", err));
     }
 }
