@@ -510,7 +510,6 @@ mod db {
                     .to_string()
             })
             .collect();
-        dbg!(&cycle);
         cycle.pop();
 
         NeverEq(Err(Arc::new(FileErrors {
@@ -528,7 +527,6 @@ mod db {
         cycle: &[String],
         _name: &String,
     ) -> NeverEq<Result<T, nodes::ErrorKind>> {
-        dbg!(&cycle);
         // We get a list of strings like "semantic_package_inner(\"b\")",
         let mut cycle: Vec<_> = cycle
             .iter()
@@ -548,7 +546,6 @@ mod db {
         fn import(&mut self, path: &str) -> Result<PolyType, nodes::ErrorKind> {
             self.semantic_package_cycle(path.into())
                 .0
-                .map_err(|err| dbg!(err))
                 .map(|exports| exports.typ())
         }
         fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {
@@ -563,7 +560,6 @@ mod db {
         fn import(&mut self, path: &str) -> Result<PolyType, nodes::ErrorKind> {
             self.semantic_package_cycle(path.into())
                 .0
-                .map_err(|err| dbg!(err))
                 .map(|exports| exports.typ())
         }
         fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {

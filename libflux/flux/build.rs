@@ -61,6 +61,8 @@ fn main() -> Result<()> {
 
     let (prelude, imports, sem_pkgs) =
         bootstrap::infer_stdlib_dir(stdlib_path, fluxcore::semantic::AnalyzerConfig::default())?;
+    dbg!((prelude.len(), imports.len(), sem_pkgs.len()));
+    panic!();
 
     // Validate there aren't any free type variables in the environment
     for (name, ty) in prelude.iter() {
