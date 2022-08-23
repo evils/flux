@@ -5,7 +5,7 @@
 
 use std::{env::consts, fs, io, io::Write, path::Path, sync::Arc};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use libflate::gzip::Encoder;
 use walkdir::WalkDir;
 
@@ -56,20 +56,20 @@ fn infer_stdlib_dir_(
     path: &Path,
     config: AnalyzerConfig,
 ) -> Result<(PackageExports, Packages, SemanticPackageMap)> {
-    let (db, package_list) = parse_dir(path)?;
+    let (mut db, package_list) = parse_dir(path)?;
 
+    db.set_analyzer_config(config);
+
+    let mut imports = Packages::default();
+    let mut sem_pkg_map = SemanticPackageMap::default();
     for name in &package_list {
-        db.semantic_package(name.clone())?;
+        let (exports, pkg) = db.semantic_package(name.clone())?;
+        imports.insert(name.clone(), PackageExports::clone(&exports)); // TODO Clone Arc
+        sem_pkg_map.insert(name.clone(), Package::clone(&pkg)); // TODO Clone Arc
     }
 
-    let mut infer_state = InferState {
-        config,
-        ..InferState::default()
-    };
-    let prelude = infer_state.infer_pre(&db)?;
-    infer_state.infer_std(&db, &package_list, &prelude)?;
-
-    Ok((prelude, infer_state.imports, infer_state.sem_pkg_map))
+    let prelude = db.prelude()?;
+    Ok((PackageExports::clone(&prelude), imports, sem_pkg_map))
 }
 
 /// Recursively parse all flux files within a directory.
@@ -107,80 +107,8 @@ pub fn parse_dir(dir: &Path) -> io::Result<(Database, Vec<String>)> {
             }
         }
     }
+
     Ok((db, files))
-}
-
-#[derive(Default)]
-struct InferState {
-    // types available for import
-    imports: Packages,
-    sem_pkg_map: SemanticPackageMap,
-    config: AnalyzerConfig,
-}
-
-impl InferState {
-    fn infer_pre(&mut self, ast_packages: &Database) -> Result<PackageExports> {
-        let mut prelude_map = PackageExports::new();
-        for name in PRELUDE {
-            // Infer each package in the prelude allowing the earlier packages to be used by later
-            // packages within the prelude list.
-            let (types, _sem_pkg) = self.infer_pkg(name, ast_packages, &prelude_map)?;
-
-            prelude_map.copy_bindings_from(&types);
-        }
-        Ok(prelude_map)
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn infer_std(
-        &mut self,
-        ast_packages: &Database,
-        package_list: &[String],
-        prelude: &PackageExports,
-    ) -> Result<()> {
-        for path in package_list {
-            // No need to infer the package again if it has already been inferred through a
-            // dependency
-            if !self.sem_pkg_map.contains_key(path) {
-                let (types, sem_pkg) = self.infer_pkg(path, ast_packages, prelude)?;
-
-                self.sem_pkg_map.insert(path.to_string(), sem_pkg);
-                if !self.imports.contains_key(path) {
-                    self.imports.insert(path.to_string(), types);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    // Infer the types in a package(file), returning a hash map containing
-    // the inferred types along with a possibly updated map of package imports.
-    //
-    #[allow(clippy::type_complexity)]
-    fn infer_pkg(
-        &mut self,
-        name: &str,               // name of package to infer
-        db: &Database,            // ast_packages available for inference
-        prelude: &PackageExports, // prelude types
-    ) -> Result<(
-        PackageExports, // inferred types
-        Package,        // semantic graph
-    )> {
-        let file = db
-            .ast_package(name.into())
-            .ok_or_else(|| anyhow!(r#"package import "{}" not found"#, name))?;
-
-        let env = Environment::new(prelude.into());
-        let mut analyzer = Analyzer::new(env, &mut self.imports, self.config.clone());
-        let (exports, sem_pkg) = analyzer.analyze_ast(&file).map_err(|mut err| {
-            if err.error.source.is_none() {
-                err.error.source = file.base.location.source.clone();
-            }
-            err.error.pretty_error()
-        })?;
-
-        Ok((exports, sem_pkg))
-    }
 }
 
 fn stdlib_importer(path: &Path) -> FileSystemImporter<StdFS> {
@@ -377,7 +305,6 @@ mod db {
         #[salsa::transparent]
         fn prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
 
-        #[salsa::cycle(recover_cycle)]
         fn semantic_package_inner(
             &self,
             path: String,
@@ -388,13 +315,19 @@ mod db {
             &self,
             path: String,
         ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>>;
+
+        #[salsa::cycle(recover_cycle)]
+        fn semantic_package_cycle(
+            &self,
+            path: String,
+        ) -> NeverEq<Result<Option<Arc<PackageExports>>, CycleError>>;
     }
 
     /// Storage for flux programs and their intermediates
     #[salsa::database(FluxStorage)]
     pub struct Database {
         storage: salsa::Storage<Self>,
-        packages: Mutex<HashSet<String>>,
+        pub(crate) packages: Mutex<HashSet<String>>,
     }
 
     impl Default for Database {
@@ -425,7 +358,6 @@ mod db {
     }
 
     fn ast_package_inner_2(db: &dyn Flux, path: String) -> Arc<ast::Package> {
-        eprintln!("AST: {}", path);
         let source = db.source(path.clone());
 
         let file = parser::parse_string(path.clone(), &source);
@@ -461,8 +393,7 @@ mod db {
         for name in INTERNAL_PRELUDE {
             // Infer each package in the prelude allowing the earlier packages to be used by later
             // packages within the prelude list.
-            let (types, _sem_pkg) = semantic_package_with_prelude(db, name.into(), &prelude_map)
-                .map_err(|err| err.error)?;
+            let (types, _sem_pkg) = db.semantic_package(name.into()).map_err(|err| err.error)?;
 
             prelude_map.copy_bindings_from(&types);
         }
@@ -478,8 +409,7 @@ mod db {
         for name in PRELUDE {
             // Infer each package in the prelude allowing the earlier packages to be used by later
             // packages within the prelude list.
-            let (types, _sem_pkg) = semantic_package_with_prelude(db, name.into(), &prelude_map)
-                .map_err(|err| err.error)?;
+            let (types, _sem_pkg) = db.semantic_package(name.into()).map_err(|err| err.error)?;
 
             prelude_map.copy_bindings_from(&types);
         }
@@ -498,7 +428,6 @@ mod db {
         db: &dyn Flux,
         path: String,
     ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
-        eprintln!("SEMANTIC: {}", path);
         let prelude = if !db.use_prelude() || INTERNAL_PRELUDE.contains(&&path[..]) {
             Default::default()
         } else if [
@@ -531,7 +460,7 @@ mod db {
         db: &dyn Flux,
         path: String,
     ) -> SalvageResult<(Arc<PackageExports>, Arc<nodes::Package>), Arc<FileErrors>> {
-        semantic_package_inner(db, path).0
+        db.semantic_package_inner(path).0
     }
 
     fn semantic_package_with_prelude(
@@ -552,59 +481,74 @@ mod db {
         Ok((Arc::new(exports), Arc::new(sem_pkg)))
     }
 
+    #[derive(Clone, Debug, thiserror::Error)]
+    #[error("found a cycle")]
+    pub struct CycleError {
+        cycle: Vec<String>,
+    }
+
+    fn semantic_package_cycle(
+        db: &dyn Flux,
+        path: String,
+    ) -> NeverEq<Result<Option<Arc<PackageExports>>, CycleError>> {
+        NeverEq(Ok(db
+            .semantic_package(path)
+            .ok()
+            .map(|(exports, _)| exports)))
+    }
+
     fn recover_cycle<T>(
         _db: &dyn Flux,
         cycle: &[String],
-        name: &String,
-    ) -> NeverEq<SalvageResult<T, Arc<FileErrors>>> {
+        _name: &String,
+    ) -> NeverEq<Result<T, CycleError>> {
+        dbg!(&cycle);
+        // We get a list of strings like "semantic_package_inner(\"b\")",
         let mut cycle: Vec<_> = cycle
             .iter()
-            .filter(|k| k.starts_with("semantic_package("))
+            .filter(|k| k.starts_with("semantic_package_inner("))
             .map(|k| {
                 k.trim_matches(|c: char| c != '"')
                     .trim_matches('"')
-                    .trim_start_matches('@')
                     .to_string()
             })
             .collect();
-        dbg!(&cycle);
         cycle.pop();
 
-        NeverEq(Err(Arc::new(FileErrors {
-            file: name.clone(),
-            source: None,
-            diagnostics: Default::default(), // TODO
-        })
-        .into()))
+        NeverEq(Err(CycleError { cycle }))
     }
 
     impl Importer for Database {
         fn import(&mut self, path: &str) -> Option<PolyType> {
-            self.semantic_package(path.into())
-                .map_err(|err| eprintln!("{}", err))
+            self.semantic_package_cycle(path.into())
+                .0
                 .ok()
-                .map(|(exports, _)| exports.typ())
+                .flatten()
+                .map(|exports| exports.typ())
         }
         fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {
-            self.semantic_package(path.into())
-                .map_err(|err| eprintln!("{}", err))
+            self.semantic_package_cycle(path.into())
+                .0
                 .ok()
-                .and_then(|(exports, _)| exports.lookup_symbol(symbol_name).cloned())
+                .flatten()
+                .and_then(|exports| exports.lookup_symbol(symbol_name).cloned())
         }
     }
 
     impl Importer for &dyn Flux {
         fn import(&mut self, path: &str) -> Option<PolyType> {
-            self.semantic_package(path.into())
-                .map_err(|err| eprintln!("{}", err))
+            self.semantic_package_cycle(path.into())
+                .0
                 .ok()
-                .map(|(exports, _)| exports.typ())
+                .flatten()
+                .map(|exports| exports.typ())
         }
         fn symbol(&mut self, path: &str, symbol_name: &str) -> Option<Symbol> {
-            self.semantic_package(path.into())
-                .map_err(|err| eprintln!("{}", err))
+            self.semantic_package_cycle(path.into())
+                .0
                 .ok()
-                .and_then(|(exports, _)| exports.lookup_symbol(symbol_name).cloned())
+                .flatten()
+                .and_then(|exports| exports.lookup_symbol(symbol_name).cloned())
         }
     }
 }

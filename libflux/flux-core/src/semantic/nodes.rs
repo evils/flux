@@ -47,22 +47,35 @@ pub type Error = Located<ErrorKind>;
 pub enum ErrorKind {
     #[display(fmt = "{}", _0)]
     Inference(types::Error),
+
     #[display(fmt = "undefined builtin identifier {}", _0)]
     UndefinedBuiltin(String),
+
     #[display(fmt = "undefined identifier {}", _0)]
     UndefinedIdentifier(String),
+
     #[display(fmt = "invalid binary operator {}", _0)]
     InvalidBinOp(ast::Operator),
+
     #[display(fmt = "invalid unary operator {}", _0)]
     InvalidUnaryOp(ast::Operator),
+
     #[display(fmt = "invalid import path {}", _0)]
     InvalidImportPath(String),
+
+    #[derive(Clone, Debug, thiserror::Error)]
+    #[display(fmt = "cycle {:?}", cycle)]
+    ImportCycle { cycle: Vec<String> },
+
     #[display(fmt = "return not valid in file block")]
     InvalidReturn,
+
     #[display(fmt = "can't vectorize function: {}", _0)]
     UnableToVectorize(String),
+
     #[display(fmt = "variable {} lacks the {} constraint", var, kind)]
     MissingConstraint { var: BoundTvar, kind: Kind },
+
     #[display(fmt = "{}. This is a bug in type inference", _0)]
     Bug(String),
 }
