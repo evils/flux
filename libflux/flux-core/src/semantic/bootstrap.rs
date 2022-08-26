@@ -76,7 +76,7 @@ fn infer_stdlib_dir_(
 /// Recursively parse all flux files within a directory.
 pub fn parse_dir(dir: &Path) -> io::Result<(Database, Vec<String>)> {
     let mut db = Database::default();
-    let mut files = Vec::new();
+    let mut package_names = Vec::new();
     let entries = WalkDir::new(dir)
         .into_iter()
         .filter_map(|r| r.ok())
@@ -103,13 +103,13 @@ pub fn parse_dir(dir: &Path) -> io::Result<(Database, Vec<String>)> {
                     .collect::<Vec<&str>>()[0]
                     .to_owned();
                 let path = file_name.rsplitn(2, '/').collect::<Vec<&str>>()[1].to_string();
-                files.push(path.clone());
-                db.set_source(path, source.clone());
+                package_names.push(path);
+                db.set_source(file_name, source.clone());
             }
         }
     }
 
-    Ok((db, files))
+    Ok((db, package_names))
 }
 
 fn stdlib_importer(path: &Path) -> FileSystemImporter<StdFS> {
@@ -276,6 +276,7 @@ mod db {
 
     pub trait FluxBase {
         fn has_package(&self, package: &str) -> bool;
+        fn package_files(&self, package: &str) -> Vec<String>;
         fn set_source(&mut self, path: String, source: Arc<str>);
         fn source(&self, path: String) -> Arc<str>;
     }
@@ -343,15 +344,39 @@ mod db {
             db
         }
     }
+
     impl salsa::Database for Database {}
 
     impl FluxBase for Database {
         fn has_package(&self, package: &str) -> bool {
             self.packages.lock().unwrap().contains(package)
         }
+
+        fn package_files(&self, package: &str) -> Vec<String> {
+            let packages = self.packages.lock().unwrap();
+            let found_packages = packages
+                .iter()
+                .filter(|p| {
+                    p.starts_with(package)
+                        && p[package.len()..].starts_with('/')
+                        && p[package.len() + 1..].split('/').count() == 1
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+
+            assert!(
+                !packages.is_empty(),
+                "Did not find any package files for `{}`",
+                package,
+            );
+
+            found_packages
+        }
+
         fn source(&self, path: String) -> Arc<str> {
             self.source_inner(path)
         }
+
         fn set_source(&mut self, path: String, source: Arc<str>) {
             self.packages.lock().unwrap().insert(path.clone());
 
@@ -360,21 +385,23 @@ mod db {
     }
 
     fn ast_package_inner_2(db: &dyn Flux, path: String) -> Arc<ast::Package> {
-        let source = db.source(path.clone());
+        let files = db
+            .package_files(&path)
+            .into_iter()
+            .map(|file_path| {
+                let source = db.source(file_path.clone());
 
-        let file = parser::parse_string(path.clone(), &source);
+                dbg!(&file_path);
+                parser::parse_string(file_path, &source)
+            })
+            .collect::<Vec<_>>();
 
+        dbg!(&files[0].base.location.file);
         Arc::new(ast::Package {
-            base: ast::BaseNode {
-                location: ast::SourceLocation {
-                    source: Some(source.to_string()),
-                    ..ast::SourceLocation::default()
-                },
-                ..ast::BaseNode::default()
-            },
+            base: ast::BaseNode::default(),
             path,
-            package: String::from(file.get_package()),
-            files: vec![file],
+            package: String::from(files[0].get_package()),
+            files,
         })
     }
 
@@ -599,7 +626,7 @@ mod tests {
         let mut db = Database::default();
         db.set_use_prelude(false);
 
-        for (k, v) in [("a", a), ("b", b), ("c", c)] {
+        for (k, v) in [("a/a.flux", a), ("b/b.flux", b), ("c/c.flux", c)] {
             db.set_source(k.into(), v.into());
         }
         let (types, _) = db.semantic_package("c".into())?;
@@ -657,7 +684,7 @@ mod tests {
 
         db.set_use_prelude(false);
 
-        for (k, v) in [("a", a), ("b", b)] {
+        for (k, v) in [("a/a.flux", a), ("b/b.flux", b)] {
             db.set_source(k.into(), v.into());
         }
 
@@ -675,5 +702,6 @@ mod tests {
     fn bootstrap() {
         infer_stdlib_dir("../../stdlib", AnalyzerConfig::default())
             .unwrap_or_else(|err| panic!("{}", err));
+        panic!();
     }
 }
