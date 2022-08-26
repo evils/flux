@@ -308,6 +308,7 @@ mod db {
         fn prelude(&self) -> Result<Arc<PackageExports>, Arc<FileErrors>>;
 
         #[salsa::cycle(recover_cycle2)]
+        #[allow(clippy::type_complexity)]
         fn semantic_package_inner(
             &self,
             path: String,
@@ -476,6 +477,7 @@ mod db {
         semantic_package_with_prelude(db, path, &prelude)
     }
 
+    #[allow(clippy::type_complexity)]
     fn semantic_package_inner(
         db: &dyn Flux,
         path: String,
@@ -523,7 +525,7 @@ mod db {
     fn recover_cycle2<T>(
         _db: &dyn Flux,
         cycle: &[String],
-        name: &String,
+        name: &str,
     ) -> NeverEq<SalvageResult<T, Arc<FileErrors>>> {
         let mut cycle: Vec<_> = cycle
             .iter()
@@ -538,7 +540,7 @@ mod db {
         cycle.pop();
 
         NeverEq(Err(Arc::new(FileErrors {
-            file: name.clone(),
+            file: name.to_owned(),
             source: None,
             diagnostics: From::from(located(
                 Default::default(),
@@ -550,7 +552,7 @@ mod db {
     fn recover_cycle<T>(
         _db: &dyn Flux,
         cycle: &[String],
-        _name: &String,
+        _name: &str,
     ) -> NeverEq<Result<T, nodes::ErrorKind>> {
         // We get a list of strings like "semantic_package_inner(\"b\")",
         let mut cycle: Vec<_> = cycle
