@@ -391,12 +391,10 @@ mod db {
             .map(|file_path| {
                 let source = db.source(file_path.clone());
 
-                dbg!(&file_path);
                 parser::parse_string(file_path, &source)
             })
             .collect::<Vec<_>>();
 
-        dbg!(&files[0].base.location.file);
         Arc::new(ast::Package {
             base: ast::BaseNode::default(),
             path,
@@ -702,6 +700,5 @@ mod tests {
     fn bootstrap() {
         infer_stdlib_dir("../../stdlib", AnalyzerConfig::default())
             .unwrap_or_else(|err| panic!("{}", err));
-        panic!();
     }
 }
