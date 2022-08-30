@@ -558,7 +558,7 @@ impl File {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(missing_docs)]
 pub struct PackageClause {
     pub loc: ast::SourceLocation,
@@ -890,7 +890,7 @@ impl StringExprPart {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(missing_docs)]
 pub struct TextPart {
     pub loc: ast::SourceLocation,
@@ -1757,7 +1757,7 @@ impl IdentifierExpr {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(missing_docs)]
 pub struct Identifier {
     pub loc: ast::SourceLocation,
@@ -1871,7 +1871,7 @@ impl DateTimeLit {
 }
 
 /// A struct that keeps track of time in months and nanoseconds.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename = "Duration")]
 pub struct Duration {
     /// Must be a positive value.

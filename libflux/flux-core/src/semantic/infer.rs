@@ -24,7 +24,7 @@ use crate::{
 // A constraint is composed of an expected type, the actual type
 // that was found, and the source location of the actual type.
 //
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[must_use = "Constraints must be solved"]
 pub enum Constraint {
     Kind {
@@ -39,7 +39,7 @@ pub enum Constraint {
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[must_use = "Constraints must be solved"]
 pub struct Constraints(Vec<Constraint>);
 

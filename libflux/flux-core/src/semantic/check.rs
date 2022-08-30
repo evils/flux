@@ -25,7 +25,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub type Error = Located<ErrorKind>;
 
 /// This is the error type for errors returned by the `check()` function.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
     /// An assignment after the `option` keyword is not correctly formed.
     InvalidOption,

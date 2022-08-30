@@ -19,7 +19,7 @@ pub const DEFAULT_PACKAGE_NAME: &str = "main";
 
 /// Position is the AST counterpart of [`scanner::Position`].
 /// It adds serde capabilities.
-#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct Position {
     pub line: u32,
@@ -74,7 +74,7 @@ impl From<Position> for lsp_types::Position {
 }
 
 /// Represents the location of a node in the AST.
-#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct SourceLocation {
     /// File is the optional file name.
     #[serde(skip_serializing_if = "skip_string_option")]
@@ -307,7 +307,7 @@ impl Assignment {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub enum PropertyKey {
@@ -381,14 +381,14 @@ where
     seq.end()
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct Comment {
     pub text: String,
 }
 
 /// BaseNode holds the attributes every expression or statement must have.
-#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct BaseNode {
     #[serde(default)]
@@ -485,7 +485,7 @@ impl File {
 }
 
 /// Defines the current package identifier.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub struct PackageClause {
@@ -497,7 +497,7 @@ pub struct PackageClause {
 }
 
 /// Declares a single import.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub struct ImportDeclaration {
@@ -530,7 +530,7 @@ pub struct Block {
 
 /// BadStmt is a placeholder for statements for which no correct statement nodes
 /// can be created.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename = "BadStatement")]
 #[allow(missing_docs)]
 pub struct BadStmt {
@@ -634,7 +634,7 @@ impl MonoType {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct NamedType {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -644,7 +644,7 @@ pub struct NamedType {
     pub name: Identifier,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct TvarType {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -763,7 +763,7 @@ pub struct TypeExpression {
     pub constraints: Vec<TypeConstraint>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub struct TypeConstraint {
@@ -861,7 +861,7 @@ pub enum StringExprPart {
 }
 
 /// Represents the text part of an interpolated string.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct TextPart {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -994,7 +994,7 @@ pub struct FunctionExpr {
 /// based on whether the comparison is true.
 /// Arithmetic operators take numerical values (either literals or variables)
 /// as their operands and return a single numerical value.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(missing_docs)]
 pub enum Operator {
     MultiplicationOperator,
@@ -1148,7 +1148,7 @@ pub struct UnaryExpr {
 }
 
 /// LogicalOperator are used with boolean (logical) values.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[allow(missing_docs)]
 pub enum LogicalOperator {
     AndOperator,
@@ -1279,7 +1279,7 @@ pub struct DictItem {
     pub comma: Vec<Comment>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct WithSource {
     #[serde(default)]
@@ -1369,7 +1369,7 @@ pub struct Property {
 }
 
 /// Identifier represents a name that identifies a unique Node
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct Identifier {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1380,7 +1380,7 @@ pub struct Identifier {
 }
 
 /// PipeLit represents an specialized literal value, indicating the left hand value of a pipe expression.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct PipeLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1390,7 +1390,7 @@ pub struct PipeLit {
 }
 
 /// StringLit expressions begin and end with double quote marks.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct StringLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1401,7 +1401,7 @@ pub struct StringLit {
 }
 
 /// Boolean represent boolean values
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct BooleanLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1424,7 +1424,7 @@ pub struct FloatLit {
 }
 
 /// Represents integer numbers.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct IntegerLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1437,7 +1437,7 @@ pub struct IntegerLit {
 }
 
 /// Represents integer numbers.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct UintLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1516,7 +1516,7 @@ where
 }
 
 /// RegexpLit expressions begin and end with `/` and are regular expressions with syntax accepted by RE2.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct RegexpLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1528,7 +1528,7 @@ pub struct RegexpLit {
 
 /// DurationLit is a pair consisting of length of time and the unit of time measured.
 /// It is the atomic unit from which all duration literals are composed.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename = "Duration")]
 #[allow(missing_docs)]
 pub struct Duration {
@@ -1542,7 +1542,7 @@ pub struct Duration {
 /// [golang's time.Duration]: https://golang.org/pkg/time/#Duration
 // TODO: this may be better as a class initialization
 // All magnitudes in Duration vector should have the same sign
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct DurationLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]
@@ -1556,7 +1556,7 @@ pub struct DurationLit {
 /// the syntax of golang's RFC3339 Nanosecond variant.
 // TODO: we need a "duration from" that takes a time and a durationliteral, and gives an exact time.DurationLit instead of an approximation
 // TODO: this may be better as a class initialization
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub struct DateTimeLit {
     #[serde(skip_serializing_if = "BaseNode::is_empty")]

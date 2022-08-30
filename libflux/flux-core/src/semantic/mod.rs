@@ -126,7 +126,7 @@ impl From<Errors<nodes::Error>> for Errors<Error> {
 pub type Warning = Located<WarningKind>;
 
 /// `WarningKind` exposes details about where in the type analysis process a warning occurred.
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum WarningKind {
     /// An unused symbol was found in the source
     #[error("symbol {0} is never used")]
@@ -367,7 +367,7 @@ impl fmt::Display for FileErrors {
 }
 
 /// A collection of diagnostics
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub struct Diagnostics<E, W> {
     #[source]
     /// The errors the occurred in that file

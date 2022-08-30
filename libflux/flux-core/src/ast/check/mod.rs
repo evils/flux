@@ -90,7 +90,7 @@ pub fn check(node: walk::Node) -> Result<(), Errors<Error>> {
 pub type Error = Located<ErrorKind>;
 
 /// An error that can be returned while checking the AST.
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Eq)]
 #[error("{}", message)]
 pub struct ErrorKind {
     /// Error message.
