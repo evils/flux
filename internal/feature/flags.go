@@ -221,6 +221,18 @@ func Strictnulllogicalops() BoolFlag {
 	return strictNullLogicalOps
 }
 
+var prettyError = feature.MakeBoolFlag(
+	"Pretty Error",
+	"prettyError",
+	"Markus Westerlind",
+	false,
+)
+
+// PrettyError - Enables formatting with codespan for errors
+func PrettyError() BoolFlag {
+	return prettyError
+}
+
 // Inject will inject the Flagger into the context.
 func Inject(ctx context.Context, flagger Flagger) context.Context {
 	return feature.Inject(ctx, flagger)
@@ -244,6 +256,7 @@ var all = []Flag{
 	vectorizedFloat,
 	vectorizedUnaryOps,
 	strictNullLogicalOps,
+	prettyError,
 }
 
 var byKey = map[string]Flag{
@@ -264,6 +277,7 @@ var byKey = map[string]Flag{
 	"vectorizedFloat":                  vectorizedFloat,
 	"vectorizedUnaryOps":               vectorizedUnaryOps,
 	"strictNullLogicalOps":             strictNullLogicalOps,
+	"prettyError":                      prettyError,
 }
 
 // Flags returns all feature flags.
