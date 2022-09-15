@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -113,9 +114,9 @@ func HandleToJSON(hdl flux.ASTHandle) ([]byte, error) {
 	return libfluxHdl.MarshalJSON()
 }
 
-func ParseToHandle(src []byte) (*libflux.ASTPkg, error) {
+func ParseToHandle(ctx context.Context, src []byte) (*libflux.ASTPkg, error) {
 	pkg := libflux.ParseString(string(src))
-	if err := pkg.GetError(); err != nil {
+	if err := pkg.GetError(libflux.NewOptions(ctx)); err != nil {
 		return nil, err
 	}
 	return pkg, nil
