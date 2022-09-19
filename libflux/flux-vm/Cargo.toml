@@ -1,0 +1,12 @@
+[package]
+name = "flux-vm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "fluxvm"
+crate-type = ["rlib"]
+
+[dependencies]
+flux-core = { path = "../flux-core" }
+wasmtime = "0.40.1"
