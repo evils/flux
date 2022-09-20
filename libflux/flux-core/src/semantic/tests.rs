@@ -4279,6 +4279,48 @@ fn pipe_error() {
 }
 
 #[test]
+fn dynamic_builtin_signature() {
+    test_infer! {
+        src: r#"builtin x : (x: dynamic) => A"#,
+        exp: map![
+            "x" => "(x: dynamic) => A",
+        ],
+    }
+}
+
+#[test]
+fn index_dynamic() {
+    test_infer! {
+        env: map![
+            "d" => "dynamic"
+        ],
+        src: r#"arr = [d]
+v = arr[0]
+"#,
+        exp: map![
+            "arr" => "[dynamic]",
+            "v" => "dynamic",
+        ],
+    }
+}
+
+#[test]
+fn member_dynamic() {
+    test_infer! {
+        env: map![
+            "d" => "dynamic"
+        ],
+        src: r#"foo = {bar: d}
+v = foo.bar
+"#,
+        exp: map![
+            "foo" => "{bar: dynamic}",
+            "v" => "dynamic",
+        ],
+    }
+}
+
+#[test]
 fn multiple_builtins() {
     test_infer! {
         src: r#"
