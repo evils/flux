@@ -18796,6 +18796,16 @@ pub mod fbsemantic {
                 None
             }
         }
+
+        #[inline]
+        #[allow(non_snake_case)]
+        pub fn typ_as_dynamic(&self) -> Option<Dynamic<'a>> {
+            if self.typ_type() == MonoType::Dynamic {
+                self.typ().map(Dynamic::init_from_table)
+            } else {
+                None
+            }
+        }
     }
 
     impl flatbuffers::Verifiable for LogicalExpression<'_> {
@@ -18868,6 +18878,7 @@ pub mod fbsemantic {
           MonoType::Record => v.verify_union_variant::<flatbuffers::ForwardsUOffset<Record>>("MonoType::Record", pos),
           MonoType::Fun => v.verify_union_variant::<flatbuffers::ForwardsUOffset<Fun>>("MonoType::Fun", pos),
           MonoType::Dict => v.verify_union_variant::<flatbuffers::ForwardsUOffset<Dict>>("MonoType::Dict", pos),
+          MonoType::Dynamic => v.verify_union_variant::<flatbuffers::ForwardsUOffset<Dynamic>>("MonoType::Dynamic", pos),
           _ => Ok(()),
         }
      })?
@@ -19470,6 +19481,16 @@ pub mod fbsemantic {
                 }
                 MonoType::Dict => {
                     if let Some(x) = self.typ_as_dict() {
+                        ds.field("typ", &x)
+                    } else {
+                        ds.field(
+                            "typ",
+                            &"InvalidFlatbuffer: Union discriminant does not match value.",
+                        )
+                    }
+                }
+                MonoType::Dynamic => {
+                    if let Some(x) = self.typ_as_dynamic() {
                         ds.field("typ", &x)
                     } else {
                         ds.field(

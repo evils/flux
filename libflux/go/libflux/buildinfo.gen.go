@@ -42,7 +42,7 @@ var sourceHashes = map[string]string{
 	"libflux/flux-core/src/semantic/convert.rs":                                                   "098eebf9f205336d28171762e9bc5190574810939319ded8508dbf5bec37a841",
 	"libflux/flux-core/src/semantic/env.rs":                                                       "0d6295a88dae8eaaed12ee20a8d218616683e8d45a776966e0cab02be2760fd0",
 	"libflux/flux-core/src/semantic/flatbuffers/mod.rs":                                           "abac90f15b7b672d02fdd4b5d42bc61cf60a1a145cc9622bedbbd27e2dceb2e0",
-	"libflux/flux-core/src/semantic/flatbuffers/semantic_generated.rs":                            "f43b2877ca708d0f24332e26af4d2e6c7ec93914d15f24b22ecd40a2381b27bb",
+	"libflux/flux-core/src/semantic/flatbuffers/semantic_generated.rs":                            "a54e90ffe4e019cf81b800aa8404996f2afbf227300937457cba52840fb0a1b2",
 	"libflux/flux-core/src/semantic/flatbuffers/types.rs":                                         "85cc0b3c948bad9e82678a4b915dbacd05afadffd9a42f4053f305452309b7bc",
 	"libflux/flux-core/src/semantic/formatter/mod.rs":                                             "03fa713818a5e70d99b7c1f9fdd9a330fdbac66830357d0f9df60451974ebdec",
 	"libflux/flux-core/src/semantic/fresh.rs":                                                     "18cb879ece9052682c9dda8117c23acd1f63c0325feaa1aef9a53db4f17d2d69",
