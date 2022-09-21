@@ -50,7 +50,7 @@ var sourceHashes = map[string]string{
 	"libflux/flux-core/src/semantic/import.rs":                                                    "184e955211db1ceb1be782b4daf75584b86907b1428e50015497909cfc2dd89a",
 	"libflux/flux-core/src/semantic/infer.rs":                                                     "df061911c19d80f00be7779b1b1ec899dbdcf49225c129606ebd2a16b48b6159",
 	"libflux/flux-core/src/semantic/mod.rs":                                                       "68d1cdddc58148fff1db849d07586c89c8dabf20f0444eb05e4eed1293c59766",
-	"libflux/flux-core/src/semantic/nodes.rs":                                                     "f795ddf2cc540a8f813ec2d507bda3199370c4bcc6b4a1cd07ce34055dd739b2",
+	"libflux/flux-core/src/semantic/nodes.rs":                                                     "954f435d5612f73933bb95050e81cc73840ed7165c5daad1e176ba3da6e42b1a",
 	"libflux/flux-core/src/semantic/sub.rs":                                                       "8bc05ffff0990facea2130e0faf5a837f8663d59996ff85869c6e631ac654553",
 	"libflux/flux-core/src/semantic/symbols.rs":                                                   "f061d57fe4ef7f23d0adad80d43fe1c8ae92d5e25a0da4b81e21b8087e30d253",
 	"libflux/flux-core/src/semantic/types.rs":                                                     "94596aeb9bf65781652dc794e2583405d51d6ad772d44abd706e29582f97ada3",

@@ -915,7 +915,7 @@ func NewDictType(keyType, valueType MonoType) MonoType {
 
 // NewDynamicType will construct a new Dynamic MonoType
 func NewDynamicType() MonoType {
-	builder := flatbuffers.NewBuilder(32) // FIXME: how big?
+	builder := flatbuffers.NewBuilder(0)
 	offset := buildDynamicType(builder)
 	builder.Finish(offset)
 

@@ -92,11 +92,11 @@ func (d dynamic) Vector() Vector {
 }
 
 func (d dynamic) Equal(v Value) bool {
-	// XXX(sean): Do we need a custom implementation of Equal() for dynamic?
-	// Or are we fine deferring to the inner type?
-	// Seems like a dynamic value should not equal a static value, even if they're
-	// the same under the hood.
-	return d.inner.Equal(v)
+	dv, ok := v.(Dynamic)
+	if !ok {
+		return false
+	}
+	return d.inner.Equal(dv.Inner())
 }
 
 func (d dynamic) Retain() {
