@@ -102,7 +102,7 @@ The following character sequences represent operators:
     -   <    !~   [   ]   ^
     *   >    =~   {   }   ?
     /   <=   =    ,   :   "
-    %   >=   <-   .   |>
+    %   >=   <-   .   |>  @
 
 ##### Integer literals
 
@@ -1024,7 +1024,7 @@ Flux source is organized into packages.
 A package consists of one or more source files.
 Each source file is parsed individually and composed into a single package.
 
-    File = [ PackageClause ] [ ImportList ] StatementList .
+    File = [ PackageClause ] [ EditionClause ] [ ImportList ] StatementList .
     ImportList = { ImportDeclaration } .
 
 #### Package clause
@@ -1354,6 +1354,12 @@ So, you have to:
 
 Flux provides a standard library of functions. Find documentation here https://docs.influxdata.com/flux/latest/stdlib/
 
+#### Experimental namespace
+
+Within the standard library there is an `experimental` package namespace.
+Packages within this namesapce are subject to breaking changes without notice.
+See the package documentation for more details https://docs.influxdata.com/flux/latest/stdlib/experimental/
+
 ### Composite data types
 
 A composite data type is a collection of primitive data types that together have a higher meaning.
@@ -1363,6 +1369,83 @@ A composite data type is a collection of primitive data types that together have
 A query specification defines what data and operations to perform.
 The execution model reserves the right to perform those operations as efficiently as possible.
 The execution model may rewrite the query in anyway it sees fit while maintaining correctness.
+
+## Versions and editions
+
+Flux follows a [semantic versioning scheme](https://semver.org/) such that breaking changes are clearly communicated as part of the version information.
+*Editions* allow for the introduction of breaking changes via an opt-in mechanism.
+
+Flux editions are a set of features that are enabled in Flux.
+If the edition is not enabled then the features are not enabled.
+These features would otherwise be breaking changes to Flux.
+An edition is explicitly opt-in.
+The pattern of editions allows users to migrate to new Flux versions without risk that their scripts will break.
+
+An edition is separate from a version.
+A version of Flux represents a single point in the commit history of the Flux source code.
+A user can only use a single version of Flux for a given script.
+Editions represent a set of features that are enabled for a given Flux version.
+So long as the Flux version supports all the features of the edition it can be enabled.
+A user can upgrade to a newer Flux version without being required to upgrade to the newest edition of Flux.
+
+New Flux features that require a breaking change to the syntax or semantics of Flux will always be part of a new edition.
+This means that a script can regularly update to the newest Flux version without risk of breaking because any breaking changes are explicitly opt-in.
+With editions the Flux community gets both a pattern where users can always be running the latest version of Flux and the ability to introduce new useful but otherwise breaking changes to Flux.
+
+We anticipate that there will be zero or one new editions of Flux a year. A slow cadence of new editions means users have ample time to migrate to a new edition if desired.
+Even being a few years behind on editions should only mean a few migration steps in order to have access to features introduced in the newest edition.
+
+### First Edition
+
+The first edition of Flux will be 2022.1.
+This first edition will be the only minimum required edition of Flux and represents the set of features that exist in Flux today.
+
+### Future Editions
+
+Editions will be named after the year in which they are created, with an added sequence number if more than one edition needs to be created in a single year.
+For example the first edition is `2022.1` because it is created in the year `2022` and is the first edition created in that year.
+
+### Editions are optional
+
+A Flux script may specify directly the edition it requires to function.
+Additionally the Flux runtime will allow for the edition to be specified out of band of the script, thus allowing for deployments of Flux to have control over the edition.
+
+#### Edition clause
+
+The edition clause defines the edition of Flux to be used for the current script.
+
+    EditionClause = "@" edition .
+    edition = year "." decimal_digit .
+
+It is an error for multiple files within a package specify differing editions.
+
+Example
+
+    package main
+
+    @edition 2022.2
+
+    import "array"
+
+    array.from(rows: [{_value: 1.0}])
+
+### Flux Editions and Modules
+
+Each Flux module may specify its own edition, therefore a Flux script on an earlier edition may import and consume a module that uses a newer edition of Flux.
+Naturally if a module exposes a new edition feature via its API consumers of that module will be required to use at least that edition in order to directly consume the module.
+
+
+### Migrating to a new edition
+
+When a new edition is created a migration process will be provided to ease the migration process  from an older edition to a new edition.
+
+### Editions and Experimental
+
+Editions do not change the contract of the experimental package namespace.
+Experimental packages are still subject to breaking changes without notice.
+Most new features do not require a breaking change to Flux syntax or semantics.
+As such it will remain common for new packages to be introduced as experimental packages.
+When an API is stabilized, it can be promoted out of experimental without the need to create a new edition.
 
 ## Request and Response Formats
 
