@@ -1300,7 +1300,7 @@ func (f *functionValue) Call(ctx context.Context, args values.Object) (values.Va
 	}
 	defer releaseScope(scope)
 
-	fn, err := Compile(scope, f.fn, args.Type())
+	fn, err := Compile(ctx, scope, f.fn, args.Type())
 	if err != nil {
 		return nil, err
 	}
